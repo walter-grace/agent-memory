@@ -8,6 +8,9 @@
   "engines": {
     "node": ">=20"
   },
+  "scripts": {
+    "test": "node test/security.mjs"
+  },
   "exports": {
     "./types": "./types.d.ts",
     "./node/local": {

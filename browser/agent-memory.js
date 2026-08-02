@@ -14,7 +14,13 @@ import { gzipSync, gunzipSync, strFromU8, strToU8 } from "fflate";
 
 export const MEM_ADDR = "0x881a9f7ed58b7655c3c04bb2f9ef2cffd233a5ef";
 export const MEM_CHAIN_HEX = "0x1237";
-const MEM_KEY_MSG = `Hero Agent Memory encryption key v1\nContract: ${MEM_ADDR}\nChain: 4663`;
+// Key-derivation message. v2 is domain-separated and self-warning so a single blind phished
+// signature is not silently reusable, and versioned so it can rotate. Writers seal with the v2 key;
+// readers try v2 then fall back to the v1 message for blobs written before this change. The string
+// is byte-identical across every surface (browser SDK, Node, hosted MCP) — a portable cross-surface
+// key cannot bind to a web origin, so the warning line + version are the mitigation, not origin-binding.
+const MEM_KEY_MSG = `Hero Run Agent Memory key v2\nOnly sign this on herorunai.com — it derives the private key to your agent memory. Never sign it on any other site.\nContract: ${MEM_ADDR}\nChain: 4663`;
+const MEM_KEY_MSG_V1 = `Hero Agent Memory encryption key v1\nContract: ${MEM_ADDR}\nChain: 4663`;
 
 // ---- 4-byte selectors + minimal encoders (no ABI lib needed for the writes) ----
 const SEL = { mint: "0x6a627842" /* mint(string) is different; compute below */ };
@@ -68,14 +74,29 @@ export async function labelOf(agentId) {
 }
 
 // ---- wallet-derived encryption key (cached per session) ----
-let _key = null, _keyAddr = null;
+async function importKeyFromSig(sig) {
+  return crypto.subtle.importKey("raw", hexToBytes(keccak256(sig)), "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+let _key = null, _keyAddr = null;          // v2 key (used for all writes)
+let _keyV1 = null, _keyV1Addr = null;      // v1 key, derived lazily only when an old blob is met
 async function deriveKey(w) {
   if (_key && _keyAddr === w.account) return _key;
   const sig = await w.signMessage(MEM_KEY_MSG); // personal_sign via the connected wallet
-  const raw = hexToBytes(keccak256(sig));
-  _key = await crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
+  // A2: smart-account / MPC wallets can return a non-deterministic personal_sign, which would derive
+  // a different key every session and make the owner see their own memory as "sealed". Detect it once
+  // at onboarding by signing twice and comparing; refuse to cache/use a key we cannot reproduce.
+  const sig2 = await w.signMessage(MEM_KEY_MSG);
+  if (sig !== sig2) throw new Error("This wallet produced non-deterministic signatures, so encrypted memory cannot be re-read across sessions. Use a standard EOA wallet, or write public memories only.");
+  _key = await importKeyFromSig(sig);
   _keyAddr = w.account;
   return _key;
+}
+async function deriveKeyV1(w) {
+  if (_keyV1 && _keyV1Addr === w.account) return _keyV1;
+  const sig = await w.signMessage(MEM_KEY_MSG_V1);
+  _keyV1 = await importKeyFromSig(sig);
+  _keyV1Addr = w.account;
+  return _keyV1;
 }
 async function seal(w, gz) {
   const key = await deriveKey(w);
@@ -88,8 +109,16 @@ async function seal(w, gz) {
 async function open(w, blob) {
   if (blob[0] === 0) return blob.subarray(1); // plaintext
   if (blob[0] === 2) {
+    const iv = blob.subarray(1, 13), ct = blob.subarray(13);
     const key = await deriveKey(w);
-    return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: blob.subarray(1, 13) }, key, blob.subarray(13)));
+    try {
+      return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct));
+    } catch {
+      // Legacy blob sealed with the v1 key message: derive v1 lazily and retry once. Only wallets
+      // with pre-v2 blobs pay this second signature, and only when such a blob is encountered.
+      const keyV1 = await deriveKeyV1(w);
+      return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv }, keyV1, ct));
+    }
   }
   throw new Error("sealed"); // passphrase-encrypted or unknown marker
 }
@@ -124,6 +153,10 @@ export async function checkpoint(w, agentId, note, opts = {}) {
 export async function recall(w, agentId, { maxCheckpoints = 200 } = {}) {
   const head = await headOf(agentId);
   if (head.count === 0) return { entries: [], checkpoints: 0, verified: true, era: head.era };
+  // When count exceeds the cap we deliberately walk only the most recent maxCheckpoints. That window
+  // does not begin at genesis, so it cannot be verified against head from a zero seed — this is a
+  // partial (not tampered) view.
+  const truncated = head.count > maxCheckpoints;
   const eraTopic = "0x" + u(head.era);
   const agentTopic = "0x" + u(agentId);
   const raw = [];
@@ -143,8 +176,11 @@ export async function recall(w, agentId, { maxCheckpoints = 200 } = {}) {
     raw.unshift(...logs.map(decodeCheckpoint));
     block = raw[0].prevBlock;
   }
-  // verify keccak chain
-  let h = "0x" + "0".repeat(64);
+  // verify keccak chain over the walked window. For a full walk we seed from zero and later compare
+  // the running hash to the contract head. For a truncated walk we seed with the earliest walked
+  // checkpoint's on-chain prevHash so the per-link keccak check still validates the window's internal
+  // integrity, but we do NOT compare to head from zero (that would falsely read as tamper).
+  let h = truncated ? raw[0].prevHash : "0x" + "0".repeat(64);
   for (const c of raw) {
     if (keccak256(encodePacked(["bytes32", "bytes"], [h, c.data])) !== c.newHash) throw new Error(`Hash chain mismatch at seq ${c.seq}.`);
     h = c.newHash;
@@ -161,7 +197,10 @@ export async function recall(w, agentId, { maxCheckpoints = 200 } = {}) {
       for (const e of list) entries.push({ ...e, seq: c.seq, at: Array.isArray(doc) ? undefined : doc.at });
     } catch { entries.push({ role: "sealed", text: `[sealed memory · seq ${c.seq} · ${blob.length}B — only the owner wallet can read this]`, seq: c.seq }); }
   }
-  return { entries, checkpoints: raw.length, verified: h === head.hash, era: head.era };
+  // A truncated walk is a partial view, never a tamper signal: verified:false with a reason, no throw.
+  const out = { entries, checkpoints: raw.length, verified: truncated ? false : h === head.hash, era: head.era };
+  if (truncated) out.reason = `partial (last ${raw.length} of ${head.count})`;
+  return out;
 }
 
 // decode a non-indexed Checkpoint log: data = seq(32)+prevBlock(32)+prevHash(32)+newHash(32)+offset(32)+len(32)+bytes
@@ -169,10 +208,11 @@ function decodeCheckpoint(log) {
   const d = log.data.replace(/^0x/, "");
   const seq = Number(BigInt("0x" + d.slice(0, 64)));
   const prevBlock = Number(BigInt("0x" + d.slice(64, 128)));
+  const prevHash = "0x" + d.slice(128, 192);
   const newHash = "0x" + d.slice(192, 256);
   const len = Number(BigInt("0x" + d.slice(320, 384)));
   const data = "0x" + d.slice(384, 384 + len * 2);
-  return { seq, prevBlock, newHash, data };
+  return { seq, prevBlock, prevHash, newHash, data };
 }
 
 // Run a text model through a gateway with a prepaid API key (no per-message wallet popups: chat

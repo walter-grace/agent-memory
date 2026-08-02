@@ -13,7 +13,14 @@ import { privateKeyToAccount } from "viem/accounts";
 
 const MEM_ADDR = process.env.HERO_MEM_ADDR || "0x881a9f7ed58b7655c3c04bb2f9ef2cffd233a5ef";
 const RH_RPC = process.env.RH_RPC || "https://rpc.mainnet.chain.robinhood.com";
-const KEY_MSG = `Hero Agent Memory encryption key v1\nContract: ${MEM_ADDR}\nChain: 4663`;
+// Key-derivation message. v2 is domain-separated and self-warning so a single blind phished signature
+// is not silently reusable, and versioned for future rotation. Writers seal with the v2 key; readers
+// try v2 then fall back to the v1 message for blobs written before this change. The v2 string is
+// byte-identical across every surface (Node, browser SDK, hosted MCP) so the same wallet derives the
+// same key everywhere — a portable cross-surface key cannot bind to a web origin, so the warning line
+// + version are the mitigation, not origin-binding.
+const KEY_MSG = `Hero Run Agent Memory key v2\nOnly sign this on herorunai.com — it derives the private key to your agent memory. Never sign it on any other site.\nContract: ${MEM_ADDR}\nChain: 4663`;
+const KEY_MSG_V1 = `Hero Agent Memory encryption key v1\nContract: ${MEM_ADDR}\nChain: 4663`;
 const ROOT_MARK = "root::";
 const ABI = [
   { name: "checkpoint", type: "function", stateMutability: "nonpayable", inputs: [{ name: "agentId", type: "uint256" }, { name: "data", type: "bytes" }], outputs: [] },
@@ -30,6 +37,7 @@ export class OnchainMemory {
     this.wallet = createWalletClient({ account: this.account, chain: rhChain, transport: http(RH_RPC) });
     this.pub = createPublicClient({ chain: rhChain, transport: http(RH_RPC) });
     this._key = null;
+    this._keyV1 = null;
   }
   async _cryptoKey() {
     if (this._key) return this._key;
@@ -38,6 +46,15 @@ export class OnchainMemory {
     const { webcrypto } = await import("node:crypto");
     this._key = await webcrypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
     return this._key;
+  }
+  // v1 key, derived lazily only when a pre-v2 blob is encountered on read.
+  async _cryptoKeyV1() {
+    if (this._keyV1) return this._keyV1;
+    const sig = await this.account.signMessage({ message: KEY_MSG_V1 });
+    const raw = toBytes(keccak256(toBytes(sig)));
+    const { webcrypto } = await import("node:crypto");
+    this._keyV1 = await webcrypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
+    return this._keyV1;
   }
   // Canonical blob format shared with the web SDK and the hosted MCP server, so memory written on
   // any surface is readable on every other one from the same wallet: byte 0 = marker
@@ -60,8 +77,14 @@ export class OnchainMemory {
     if (blob[0] === 0) doc = JSON.parse(gunzipSync(Buffer.from(blob.subarray(1))).toString()); // plaintext gzip
     else if (blob[0] !== 2) throw new Error("sealed"); // passphrase-encrypted (1) or unknown marker
     else {
-      const key = await this._cryptoKey();
-      const pt = await webcrypto.subtle.decrypt({ name: "AES-GCM", iv: blob.subarray(1, 13) }, key, blob.subarray(13));
+      const iv = blob.subarray(1, 13), ct = blob.subarray(13);
+      let pt;
+      try {
+        pt = await webcrypto.subtle.decrypt({ name: "AES-GCM", iv }, await this._cryptoKey(), ct);
+      } catch {
+        // Legacy blob sealed with the v1 key message: derive v1 lazily and retry once.
+        pt = await webcrypto.subtle.decrypt({ name: "AES-GCM", iv }, await this._cryptoKeyV1(), ct);
+      }
       doc = JSON.parse(gunzipSync(Buffer.from(pt)).toString());
     }
     // Envelope-tolerant: {v, at, entries} is canonical, but pre-envelope Node blobs on-chain are
