@@ -150,11 +150,17 @@ const list = Array.isArray(doc) ? doc : (doc.entries || []);
 
 A bare-array blob has no `at`; readers surface `at` only when the envelope provides it.
 
-## The v0.1 gap
+## Verified reads
 
-One honest limitation in v0.1: the Node on-chain read does not verify the hash chain. Node `OnchainMemory` decodes the `data`
-   param and decrypts it, but does not yet verify the `prevBlock` / `hash` chain across checkpoints.
-   The browser `recall()` in `browser/agent-memory.js` does the full backward walk: it fetches one
-   block at a time, rebuilds the keccak chain with `keccak256(encodePacked(["bytes32","bytes"], [h,
-   data]))`, and checks the final hash against `headOf(agentId).hash`. Use `recall()` as the reference
-   for tamper-evident reads, and port it to Node for the same guarantee.
+Both readers are tamper-evident. The read starts from `headOf(agentId)` (the contract's running
+keccak head: `hash`, `count`, `lastBlock`, `era`), walks `prevBlock` backwards one block at a time
+(no indexer), rebuilds the chain with `keccak256(encodePacked(["bytes32","bytes"], [h, data]))`
+over the raw blob of every checkpoint, sealed or not, and checks the final hash against
+`headOf(agentId).hash`. Any link mismatch or head mismatch fails the read; a blob the caller's
+wallet cannot decrypt is skipped after it has participated in verification. The browser
+implementation is `recall()` in `browser/agent-memory.js`; the Node port is `_all()` in
+`node/onchain.mjs`. `headOf` and `prevBlock` are the source of truth for block positions: on Orbit
+chains, event block numbers are ArbSys numbers, so `eth_blockNumber` is never consulted.
+
+Only the current era is walked. An era bump resets the chain; `headOf` reports the live era and
+the walk verifies exactly the checkpoints belonging to it.

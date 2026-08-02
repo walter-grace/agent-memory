@@ -8,7 +8,7 @@
 // This mirrors the browser SDK (browser/agent-memory.js), ported to Node. Reads walk the contract's
 // checkpoint events; writes are one transaction each (~$0.003).
 import { gzipSync, gunzipSync } from "node:zlib";
-import { keccak256, toBytes, toHex, encodeFunctionData, createWalletClient, createPublicClient, http, defineChain } from "viem";
+import { keccak256, toBytes, toHex, encodePacked, encodeFunctionData, createWalletClient, createPublicClient, http, defineChain } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
 const MEM_ADDR = process.env.HERO_MEM_ADDR || "0x881a9f7ed58b7655c3c04bb2f9ef2cffd233a5ef";
@@ -75,30 +75,74 @@ export class OnchainMemory {
     const call = encodeFunctionData({ abi: ABI, functionName: "checkpoint", args: [this.agentId, data] });
     return this.wallet.sendTransaction({ to: MEM_ADDR, data: call });
   }
+  // Verified reads: a port of the browser SDK's recall() (browser/agent-memory.js).
   // Checkpoint(uint256 indexed agentId, uint64 indexed era, uint64 seq, uint64 prevBlock,
-  //            bytes32 hash, bytes32 prevHash, bytes data): agentId + era are indexed (topics).
-  // The encrypted payload is the trailing `data` bytes param in the event DATA, not the whole DATA.
-  // v0.1: write (append/encrypt) is complete and correct; READ decodes the `data` param but does
-  // NOT yet verify the prevBlock/hash chain. For tamper-proof reads, port decodeCheckpoint + the
-  // backwards hash-chain walk from the browser SDK (browser/agent-memory.js recall()).
+  //            bytes32 prevHash, bytes32 newHash, bytes data): agentId + era are indexed (topics),
+  // so the event DATA words are seq(0) prevBlock(1) prevHash(2) newHash(3) offset(4) len bytes.
+  // The walk starts from the contract's head, follows prevBlock backwards one block at a time
+  // (on Orbit chains, block numbers in events are ArbSys numbers, which is why headOf/prevBlock
+  // are the source of truth, never eth_blockNumber), rebuilds the keccak chain over the raw blob
+  // of every checkpoint (sealed or not), and refuses to return entries if any link or the final
+  // head mismatches. Decrypt failures on individual blobs are tolerated; tamper is not.
   async raw() { return (await this._all()).filter((e) => !(e.role === "agent" && e.text.startsWith(ROOT_MARK))); }
+  async _head() {
+    const sel = keccak256(toBytes("headOf(uint256)")).slice(0, 10);
+    const res = await this.pub.request({ method: "eth_call", params: [{ to: MEM_ADDR, data: sel + this.agentId.toString(16).padStart(64, "0") }, "latest"] });
+    const b = (res || "0x").replace(/^0x/, "").padEnd(256, "0");
+    return {
+      hash: "0x" + b.slice(0, 64),
+      count: Number(BigInt("0x" + (b.slice(64, 128) || "0"))),
+      lastBlock: Number(BigInt("0x" + (b.slice(128, 192) || "0"))),
+      era: Number(BigInt("0x" + (b.slice(192, 256) || "0"))),
+    };
+  }
   async _all() {
     const T = keccak256(toBytes("Checkpoint(uint256,uint64,uint64,uint64,bytes32,bytes32,bytes)"));
     const agentTopic = "0x" + this.agentId.toString(16).padStart(64, "0");
-    const logs = await this.pub.request({ method: "eth_getLogs", params: [{ address: MEM_ADDR, topics: [T, agentTopic], fromBlock: "0x0", toBlock: "latest" }] }).catch(() => []);
+    const head = await this._head();
+    if (head.count === 0) return [];
+    const eraTopic = "0x" + BigInt(head.era).toString(16).padStart(64, "0");
+    // Walk backwards from the head block, one block per hop (no indexer needed).
+    const raw = [];
+    let block = head.lastBlock;
+    for (let i = 0; i < head.count && block > 0; i++) {
+      const hexBlk = "0x" + block.toString(16);
+      let logs = [];
+      for (let attempt = 0; attempt < 4 && !logs.length; attempt++) {
+        if (attempt) await new Promise((r) => setTimeout(r, 1000 * attempt));
+        logs = await this.pub.request({ method: "eth_getLogs", params: [{ address: MEM_ADDR, topics: [T, agentTopic, eraTopic], fromBlock: hexBlk, toBlock: hexBlk }] }).catch(() => []);
+      }
+      if (!logs.length) throw new Error(`Memory read: missing checkpoint at block ${block} (RPC gap).`);
+      logs.sort((a, b) => parseInt(a.logIndex, 16) - parseInt(b.logIndex, 16));
+      raw.unshift(...logs.map((l) => {
+        const d = (l.data || "0x").slice(2);
+        const off = parseInt(d.slice(4 * 64, 5 * 64), 16) * 2;       // offset to the bytes param
+        const len = parseInt(d.slice(off, off + 64), 16) * 2;         // its byte length
+        return {
+          seqNo: Number(BigInt("0x" + d.slice(0, 64))),
+          prevBlock: Number(BigInt("0x" + d.slice(64, 128))),
+          newHash: "0x" + d.slice(192, 256),
+          data: "0x" + d.slice(off + 64, off + 64 + len),
+        };
+      }));
+      block = raw[0].prevBlock;
+    }
+    // Rebuild and verify the keccak chain over the raw blobs, then check it against the head.
+    let h = "0x" + "0".repeat(64);
+    for (const c of raw) {
+      if (keccak256(encodePacked(["bytes32", "bytes"], [h, c.data])) !== c.newHash) throw new Error(`Memory read: hash chain mismatch at checkpoint seq ${c.seqNo}.`);
+      h = c.newHash;
+    }
+    if (h !== head.hash) throw new Error("Memory read: chain head mismatch (walk incomplete or contract head moved).");
+    // Chain verified: now decrypt what we can. A blob we cannot open (another wallet's) is skipped;
+    // it still participated in the hash verification above.
     const out = [];
     let seq = 0;
-    for (const l of logs) {
+    for (const c of raw) {
       try {
-        // event DATA = seq(32) prevBlock(32) hash(32) prevHash(32) offset(32) len(32) bytes… ; the
-        // `data` bytes is the last dynamic param: read its length then that many bytes.
-        const hex = (l.data || "0x").slice(2);
-        const off = parseInt(hex.slice(4 * 64, 5 * 64), 16) * 2;      // offset to the bytes param
-        const len = parseInt(hex.slice(off, off + 64), 16) * 2;        // its byte length
-        const blob = Buffer.from(hex.slice(off + 64, off + 64 + len), "hex");
-        const entries = await this._open(blob);
+        const entries = await this._open(Buffer.from(c.data.slice(2), "hex"));
         for (const e of entries) out.push({ ...e, seq: ++seq });
-      } catch { /* not ours / sealed / decode gap */ }
+      } catch { /* sealed by another wallet / undecodable payload */ }
     }
     return out;
   }
