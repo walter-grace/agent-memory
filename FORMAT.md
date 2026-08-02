@@ -59,7 +59,7 @@ a random IV, and ciphertext.
 
 ```
 Hero Run Agent Memory key v2
-Only sign this on herorunai.com — it derives the private key to your agent memory. Never sign it on any other site.
+Only sign this on herorunai.com. It derives the private key to your agent memory. Never sign it on any other site.
 Contract: 0x881a9f7ed58b7655c3c04bb2f9ef2cffd233a5ef
 Chain: 4663
 ```

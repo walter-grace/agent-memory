@@ -19,7 +19,7 @@ const RH_RPC = process.env.RH_RPC || "https://rpc.mainnet.chain.robinhood.com";
 // byte-identical across every surface (Node, browser SDK, hosted MCP) so the same wallet derives the
 // same key everywhere — a portable cross-surface key cannot bind to a web origin, so the warning line
 // + version are the mitigation, not origin-binding.
-const KEY_MSG = `Hero Run Agent Memory key v2\nOnly sign this on herorunai.com — it derives the private key to your agent memory. Never sign it on any other site.\nContract: ${MEM_ADDR}\nChain: 4663`;
+const KEY_MSG = `Hero Run Agent Memory key v2\nOnly sign this on herorunai.com. It derives the private key to your agent memory. Never sign it on any other site.\nContract: ${MEM_ADDR}\nChain: 4663`;
 const KEY_MSG_V1 = `Hero Agent Memory encryption key v1\nContract: ${MEM_ADDR}\nChain: 4663`;
 const ROOT_MARK = "root::";
 const ABI = [

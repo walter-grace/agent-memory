@@ -19,7 +19,7 @@ export const MEM_CHAIN_HEX = "0x1237";
 // readers try v2 then fall back to the v1 message for blobs written before this change. The string
 // is byte-identical across every surface (browser SDK, Node, hosted MCP) — a portable cross-surface
 // key cannot bind to a web origin, so the warning line + version are the mitigation, not origin-binding.
-const MEM_KEY_MSG = `Hero Run Agent Memory key v2\nOnly sign this on herorunai.com — it derives the private key to your agent memory. Never sign it on any other site.\nContract: ${MEM_ADDR}\nChain: 4663`;
+const MEM_KEY_MSG = `Hero Run Agent Memory key v2\nOnly sign this on herorunai.com. It derives the private key to your agent memory. Never sign it on any other site.\nContract: ${MEM_ADDR}\nChain: 4663`;
 const MEM_KEY_MSG_V1 = `Hero Agent Memory encryption key v1\nContract: ${MEM_ADDR}\nChain: 4663`;
 
 // ---- 4-byte selectors + minimal encoders (no ABI lib needed for the writes) ----

@@ -20,7 +20,7 @@ const ROOT = resolve(HERE, "..");
 const DESKTOP = resolve(ROOT, "..");
 
 const MEM_ADDR = "0x881a9f7ed58b7655c3c04bb2f9ef2cffd233a5ef";
-const V2 = `Hero Run Agent Memory key v2\nOnly sign this on herorunai.com — it derives the private key to your agent memory. Never sign it on any other site.\nContract: ${MEM_ADDR}\nChain: 4663`;
+const V2 = `Hero Run Agent Memory key v2\nOnly sign this on herorunai.com. It derives the private key to your agent memory. Never sign it on any other site.\nContract: ${MEM_ADDR}\nChain: 4663`;
 const V1 = `Hero Agent Memory encryption key v1\nContract: ${MEM_ADDR}\nChain: 4663`;
 const TEST_PK = "0x" + "11".repeat(32);
 
@@ -80,7 +80,7 @@ await t("v2 key message identical in all 5 surfaces", async () => {
     resolve(DESKTOP, "hero-foundry-web/public/hero-run-mcp.mjs"),
   ];
   // The literal as it appears in source: the v2 string with the ${MEM_ADDR} placeholder unresolved.
-  const literal = "Hero Run Agent Memory key v2\\nOnly sign this on herorunai.com — it derives the private key to your agent memory. Never sign it on any other site.\\nContract: ${MEM_ADDR}\\nChain: 4663";
+  const literal = "Hero Run Agent Memory key v2\\nOnly sign this on herorunai.com. It derives the private key to your agent memory. Never sign it on any other site.\\nContract: ${MEM_ADDR}\\nChain: 4663";
   for (const f of files) {
     const src = await readFile(f, "utf8");
     assert(src.includes(literal), `v2 literal missing/altered in ${f}`);
