@@ -4,16 +4,39 @@
   "description": "Wallet-owned, compacting agent memory with an optional encrypted on-chain backend, interoperable across surfaces from one wallet.",
   "type": "module",
   "license": "MIT",
+  "types": "./types.d.ts",
   "engines": {
     "node": ">=20"
   },
   "exports": {
-    "./node/local": "./node/local.mjs",
-    "./node/onchain": "./node/onchain.mjs",
-    "./node/compaction": "./node/compaction.mjs",
-    "./browser/agent-memory": "./browser/agent-memory.js",
-    "./browser/rpc-client": "./browser/rpc-client.js"
+    "./types": "./types.d.ts",
+    "./node/local": {
+      "types": "./node/local.d.ts",
+      "default": "./node/local.mjs"
+    },
+    "./node/onchain": {
+      "types": "./node/onchain.d.ts",
+      "default": "./node/onchain.mjs"
+    },
+    "./node/compaction": {
+      "types": "./node/compaction.d.ts",
+      "default": "./node/compaction.mjs"
+    },
+    "./browser/agent-memory": {
+      "types": "./browser/agent-memory.d.ts",
+      "default": "./browser/agent-memory.js"
+    },
+    "./browser/rpc-client": {
+      "types": "./browser/rpc-client.d.ts",
+      "default": "./browser/rpc-client.js"
+    }
   },
+  "files": [
+    "node",
+    "browser",
+    "types.d.ts",
+    "FORMAT.md"
+  ],
   "optionalDependencies": {
     "viem": "^2.0.0",
     "fflate": "^0.8.0"
@@ -25,6 +48,7 @@
     "onchain",
     "encryption",
     "wallet",
-    "robinhood-chain"
+    "robinhood-chain",
+    "typescript"
   ]
 }
