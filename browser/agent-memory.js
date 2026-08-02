@@ -155,7 +155,10 @@ export async function recall(w, agentId, { maxCheckpoints = 200 } = {}) {
     try {
       const gz = await open(w, blob);
       const doc = JSON.parse(strFromU8(gunzipSync(gz)));
-      for (const e of doc.entries) entries.push({ ...e, seq: c.seq, at: doc.at });
+      // Envelope-tolerant: {v, at, entries} is canonical; pre-envelope Node blobs sealed a bare
+      // entries array. Both decrypt fine; accept both shapes.
+      const list = Array.isArray(doc) ? doc : (doc.entries || []);
+      for (const e of list) entries.push({ ...e, seq: c.seq, at: Array.isArray(doc) ? undefined : doc.at });
     } catch { entries.push({ role: "sealed", text: `[sealed memory · seq ${c.seq} · ${blob.length}B — only the owner wallet can read this]`, seq: c.seq }); }
   }
   return { entries, checkpoints: raw.length, verified: h === head.hash, era: head.era };

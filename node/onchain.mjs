@@ -48,17 +48,27 @@ export class OnchainMemory {
     const { webcrypto } = await import("node:crypto");
     const key = await this._cryptoKey();
     const iv = webcrypto.getRandomValues(new Uint8Array(12));
-    const gz = gzipSync(Buffer.from(JSON.stringify(entries)));
+    // Canonical payload envelope {v, at, entries}: the shape every surface writes and reads.
+    // _open below still accepts legacy bare-array blobs written before the envelope was unified.
+    const gz = gzipSync(Buffer.from(JSON.stringify({ v: 1, at: new Date().toISOString(), entries })));
     const ct = new Uint8Array(await webcrypto.subtle.encrypt({ name: "AES-GCM", iv }, key, gz));
     return Buffer.concat([Buffer.from([2]), Buffer.from(iv), Buffer.from(ct)]); // 2 = wallet-derived AES-GCM
   }
   async _open(blob) {
     const { webcrypto } = await import("node:crypto");
-    if (blob[0] === 0) return JSON.parse(gunzipSync(Buffer.from(blob.subarray(1))).toString()); // plaintext gzip
-    if (blob[0] !== 2) throw new Error("sealed"); // passphrase-encrypted (1) or unknown marker
-    const key = await this._cryptoKey();
-    const pt = await webcrypto.subtle.decrypt({ name: "AES-GCM", iv: blob.subarray(1, 13) }, key, blob.subarray(13));
-    return JSON.parse(gunzipSync(Buffer.from(pt)).toString());
+    let doc;
+    if (blob[0] === 0) doc = JSON.parse(gunzipSync(Buffer.from(blob.subarray(1))).toString()); // plaintext gzip
+    else if (blob[0] !== 2) throw new Error("sealed"); // passphrase-encrypted (1) or unknown marker
+    else {
+      const key = await this._cryptoKey();
+      const pt = await webcrypto.subtle.decrypt({ name: "AES-GCM", iv: blob.subarray(1, 13) }, key, blob.subarray(13));
+      doc = JSON.parse(gunzipSync(Buffer.from(pt)).toString());
+    }
+    // Envelope-tolerant: {v, at, entries} is canonical, but pre-envelope Node blobs on-chain are
+    // bare arrays. Carry `at` onto each entry when the envelope provides it.
+    const entries = Array.isArray(doc) ? doc : (doc.entries || []);
+    const at = Array.isArray(doc) ? undefined : doc.at;
+    return at ? entries.map((e) => ({ at, ...e })) : entries;
   }
   async append(entries) {
     const data = toHex(await this._seal(entries));

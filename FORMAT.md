@@ -132,18 +132,27 @@ holds it, because they all share this contract, this key derivation, and this bl
 no server, no shared secret, and no indexer in the path: the wallet is the credential and the
 decryption key at once.
 
-## Payload envelope and the v0.1 gap
+## Payload envelope
 
-Two honest limitations in v0.1:
+The gzip'd JSON inside every blob is one canonical shape on every surface:
 
-1. Payload envelope differs between surfaces. The blob, marker, IV, GCM, and key derivation are
-   identical across surfaces, but the gzip'd JSON inside is not yet a single shared shape. Node
-   `OnchainMemory` seals a bare array, `JSON.stringify(entries)`. The browser SDK seals an object,
-   `JSON.stringify({ v: 1, at, entries })`. Each surface reads its own envelope. Aligning both on the
-   `{ v, at, entries }` envelope is the intended v1 fix; until then, treat cross-surface payload reads
-   at the JSON layer as not guaranteed even though the crypto layer matches.
+```json
+{ "v": 1, "at": "<ISO 8601 write time>", "entries": [{ "role": "...", "text": "..." }] }
+```
 
-2. The Node on-chain read does not verify the hash chain. Node `OnchainMemory` decodes the `data`
+Writers seal this envelope. Readers accept it, and also accept a legacy shape: early Node
+`OnchainMemory` versions sealed a bare `entries` array with no wrapper, and those blobs are
+immutable on-chain, so every reader stays tolerant of both:
+
+```js
+const list = Array.isArray(doc) ? doc : (doc.entries || []);
+```
+
+A bare-array blob has no `at`; readers surface `at` only when the envelope provides it.
+
+## The v0.1 gap
+
+One honest limitation in v0.1: the Node on-chain read does not verify the hash chain. Node `OnchainMemory` decodes the `data`
    param and decrypts it, but does not yet verify the `prevBlock` / `hash` chain across checkpoints.
    The browser `recall()` in `browser/agent-memory.js` does the full backward walk: it fetches one
    block at a time, rebuilds the keccak chain with `keccak256(encodePacked(["bytes32","bytes"], [h,
