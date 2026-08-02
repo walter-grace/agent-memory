@@ -1,0 +1,30 @@
+{
+  "name": "agent-memory",
+  "version": "0.1.0",
+  "description": "Wallet-owned, compacting agent memory with an optional encrypted on-chain backend, interoperable across surfaces from one wallet.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    "./node/local": "./node/local.mjs",
+    "./node/onchain": "./node/onchain.mjs",
+    "./node/compaction": "./node/compaction.mjs",
+    "./browser/agent-memory": "./browser/agent-memory.js",
+    "./browser/rpc-client": "./browser/rpc-client.js"
+  },
+  "optionalDependencies": {
+    "viem": "^2.0.0",
+    "fflate": "^0.8.0"
+  },
+  "keywords": [
+    "agent",
+    "memory",
+    "compaction",
+    "onchain",
+    "encryption",
+    "wallet",
+    "robinhood-chain"
+  ]
+}
