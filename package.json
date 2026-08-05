@@ -1,15 +1,24 @@
 {
   "name": "agent-memory",
   "version": "0.1.0",
-  "description": "Wallet-owned, compacting agent memory with an optional encrypted on-chain backend, interoperable across surfaces from one wallet.",
+  "description": "Wallet-owned, compacting memory for AI agents: an agent is an NFT, its memory a hash-linked chain of encrypted checkpoints on Robinhood Chain. Includes the Solidity contracts, deploy/migration tooling, a memory CLI, and a Node/browser client library. Powered by $HERO.",
   "type": "module",
   "license": "MIT",
+  "author": "Hero Run",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/walter-grace/agent-memory"
+  },
   "types": "./types.d.ts",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "test": "node test/security.mjs"
+    "test": "node test/security.mjs",
+    "compile": "node compile.mjs",
+    "deploy": "node deploy.mjs",
+    "agent": "node agent.mjs",
+    "redteam": "node redteam.mjs"
   },
   "exports": {
     "./types": "./types.d.ts",
@@ -37,21 +46,32 @@
   "files": [
     "node",
     "browser",
+    "contracts",
     "types.d.ts",
     "FORMAT.md"
   ],
   "optionalDependencies": {
-    "viem": "^2.0.0",
+    "viem": "^2.55.10",
     "fflate": "^0.8.0"
+  },
+  "devDependencies": {
+    "solc": "^0.8.36"
   },
   "keywords": [
     "agent",
+    "agent-memory",
+    "ai-agents",
     "memory",
     "compaction",
     "onchain",
     "encryption",
     "wallet",
+    "nft",
+    "erc721",
     "robinhood-chain",
+    "ethereum",
+    "hero-run",
+    "web3",
     "typescript"
   ]
 }

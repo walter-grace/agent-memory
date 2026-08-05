@@ -13,15 +13,23 @@ import { webcrypto } from "node:crypto";
 import { readFile, writeFile, unlink } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { OnchainMemory } from "../node/onchain.mjs";
+import { OnchainMemory, MEM_ADDR } from "../node/onchain.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
 const DESKTOP = resolve(ROOT, "..");
 
-const MEM_ADDR = "0x881a9f7ed58b7655c3c04bb2f9ef2cffd233a5ef";
+// MEM_ADDR is imported live from node/onchain.mjs (not re-hardcoded here): the module resolves it
+// from HERO_MEM_ADDR, then a repo-local out/deployment.json, then a fixed fallback (see
+// node/onchain.mjs's defaultMemAddr()) — so these round-trip tests always match whatever address
+// this checkout's OnchainMemory instances actually derive their keys against.
 const V2 = `Hero Run Agent Memory key v2\nOnly sign this on herorunai.com. It derives the private key to your agent memory. Never sign it on any other site.\nContract: ${MEM_ADDR}\nChain: 4663`;
 const V1 = `Hero Agent Memory encryption key v1\nContract: ${MEM_ADDR}\nChain: 4663`;
+// The literal fallback address hardcoded as a source-text constant in files that do NOT do dynamic
+// resolution (browser SDK, and — until each is migrated — sibling repos). node/onchain.mjs itself
+// no longer hardcodes a single address at the call site (it's computed by defaultMemAddr()), so it's
+// checked separately below rather than via a source substring match.
+const LEGACY_V1_ADDR = "0x881a9f7ed58b7655c3c04bb2f9ef2cffd233a5ef";
 const TEST_PK = "0x" + "11".repeat(32);
 
 let pass = 0, fail = 0;
@@ -71,7 +79,7 @@ await t("garbage marker-2 blob → throws cleanly (no crash)", async () => {
 // ---------------------------------------------------------------------------
 console.log("A1 — cross-surface interop (v2 message byte-identical)");
 
-await t("v2 key message identical in all 5 surfaces", async () => {
+await t("v2 key message template identical in all 5 surfaces", async () => {
   const files = [
     resolve(ROOT, "browser/agent-memory.js"),
     resolve(ROOT, "node/onchain.mjs"),
@@ -80,14 +88,32 @@ await t("v2 key message identical in all 5 surfaces", async () => {
     resolve(DESKTOP, "hero-foundry-web/public/hero-run-mcp.mjs"),
   ];
   // The literal as it appears in source: the v2 string with the ${MEM_ADDR} placeholder unresolved.
+  // This part of the check is address-agnostic — it holds regardless of which contract is live.
   const literal = "Hero Run Agent Memory key v2\\nOnly sign this on herorunai.com. It derives the private key to your agent memory. Never sign it on any other site.\\nContract: ${MEM_ADDR}\\nChain: 4663";
   for (const f of files) {
     const src = await readFile(f, "utf8");
     assert(src.includes(literal), `v2 literal missing/altered in ${f}`);
-    assert(src.includes(MEM_ADDR), `default MEM_ADDR (${MEM_ADDR}) missing in ${f}`);
   }
-  // And the resolved runtime strings all equal V2 (same default address everywhere).
-  assert(literal.replace("${MEM_ADDR}", MEM_ADDR).replace(/\\n/g, "\n") === V2, "resolved v2 string drifted");
+  // Address-literal check: files that still hardcode a single fixed address should all agree on it.
+  // node/onchain.mjs is exempt — since the deployment.json wiring above, it resolves MEM_ADDR at
+  // runtime (HERO_MEM_ADDR env → repo-local out/deployment.json → this same literal as last-resort
+  // fallback) instead of hardcoding one, so the literal won't appear verbatim at the call site.
+  // KNOWN GAP (pre-existing, not from this change, out of scope for this repo): hero-agent has
+  // already been migrated to the v2 address independently, so it will fail this specific check until
+  // browser/agent-memory.js, FORMAT.md, and hero-foundry-web are migrated too (migrate-agentmemory-v2.mjs
+  // patches the hero-foundry-web + README refs; browser/agent-memory.js and hero-agent are not in its
+  // REFS list and need a human decision on when/how to roll v2 out there).
+  const staticFiles = files.filter((f) => !f.endsWith("node/onchain.mjs"));
+  for (const f of staticFiles) {
+    const src = await readFile(f, "utf8");
+    assert(src.includes(LEGACY_V1_ADDR), `default address (${LEGACY_V1_ADDR}) missing in ${f}`);
+  }
+  const onchainSrc = await readFile(resolve(ROOT, "node/onchain.mjs"), "utf8");
+  assert(onchainSrc.includes(LEGACY_V1_ADDR), "node/onchain.mjs should still carry the legacy address as its last-resort fallback");
+  // And the resolved runtime template (fallback address substituted) matches what pre-migration
+  // callers derived, so the v1-message-format itself hasn't silently drifted.
+  const v1FallbackTemplate = "Hero Run Agent Memory key v2\nOnly sign this on herorunai.com. It derives the private key to your agent memory. Never sign it on any other site.\nContract: " + LEGACY_V1_ADDR + "\nChain: 4663";
+  assert(literal.replace("${MEM_ADDR}", LEGACY_V1_ADDR).replace(/\\n/g, "\n") === v1FallbackTemplate, "resolved v2 string drifted");
 });
 
 // ---------------------------------------------------------------------------

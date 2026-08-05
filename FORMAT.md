@@ -7,12 +7,22 @@ memory: `node/onchain.mjs` and `browser/agent-memory.js` are the reference.
 
 ## Chain and contract
 
-- Contract address: `0x881a9f7ed58b7655c3c04bb2f9ef2cffd233a5ef`
+- Contract address: `0x881a9f7ed58b7655c3c04bb2f9ef2cffd233a5ef` (v1). The live v2 contract, hardened
+  with an owner-only `rebase()` and a `MAX_CHECKPOINT_BYTES` gate, is
+  `0xce4dc968827a996f7bd5bbdb0fcb72348b18d0dc`; see the README's "Contracts" and "Security &
+  verification" sections.
 - Chain id: `4663` (hex `0x1237`), Robinhood Chain
 - Default RPC: `https://rpc.mainnet.chain.robinhood.com`
 
-The contract address is public. The 40-hex address above is safe to commit. A 64-hex private key is
-not; it never appears in this repo.
+The contract address is public. A 40-hex address is safe to commit. A 64-hex private key is not; it
+never appears in this repo.
+
+`node/onchain.mjs`'s `MEM_ADDR` is resolved at import time, in order: an explicit `HERO_MEM_ADDR`
+environment override, then this repo's local `out/deployment.json` (whatever `deploy.mjs` /
+`migrate-agentmemory-v2.mjs` last wrote there), then the v1 address above as a last-resort fallback
+for standalone/library use with no local `out/` directory. `browser/agent-memory.js` still exports a
+single fixed `MEM_ADDR` constant (the v1 address); reconciling it onto the same resolution order, or
+onto the v2 address by default, is a deliberate follow-up (see the README's "Known gap").
 
 ## Canonical blob format
 
@@ -160,6 +170,11 @@ the compaction step do not care which is in use:
 - `sinceRoot()` returns leaves recorded after the latest ROOT
 - `label()` returns a human-readable backend id, e.g. `local:<file>` or `robinhood-chain:agent#<id>`
 
+`OnchainMemory` additionally exposes `recall({ maxCheckpoints })`, returning
+`{ entries, checkpoints, verified, truncated, era }` (see "Partial (truncated) reads" below); `raw()`
+and `sinceRoot()` are built on top of it. `node/onchain.mjs` also exports a standalone `mintAgent()`
+function (an agent identity does not exist yet at mint time, so it is not an instance method).
+
 ## Interop guarantee
 
 A memory written by any surface that holds the same wallet is readable by every other surface that
@@ -215,7 +230,13 @@ responsiveness. When `headOf(agentId).count` exceeds that cap, the walk covers o
 
 A genuine per-link mismatch inside the walked window still throws. Truncation is an availability
 tradeoff (a partial view), not tampering, and must never be surfaced as "memory may be tampered".
-The Node `_all()` reader walks the full `count` and so always does the from-zero head comparison.
+
+The Node `OnchainMemory.recall({ maxCheckpoints })` (`_all()` internally) walks unbounded by default,
+so a plain `recall()` always reaches genesis and always does the strict from-zero head comparison,
+returning `truncated: false`. Pass an explicit `maxCheckpoints` to opt into the same bounded-walk,
+partial-window behavior described above: it seeds from the oldest walked checkpoint's real `prevHash`
+instead of zero and returns `truncated: true` / `verified: false` rather than throwing a false tamper
+error, exactly like the browser SDK. Every per-link keccak check still runs regardless of truncation.
 
 ### What the hash chain does and does not prove
 
