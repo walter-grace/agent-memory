@@ -94,22 +94,15 @@ await t("v2 key message template identical in all 5 surfaces", async () => {
     const src = await readFile(f, "utf8");
     assert(src.includes(literal), `v2 literal missing/altered in ${f}`);
   }
-  // Address-literal check: files that still hardcode a single fixed address should all agree on it.
-  // node/onchain.mjs is exempt — since the deployment.json wiring above, it resolves MEM_ADDR at
-  // runtime (HERO_MEM_ADDR env → repo-local out/deployment.json → this same literal as last-resort
-  // fallback) instead of hardcoding one, so the literal won't appear verbatim at the call site.
-  // KNOWN GAP (pre-existing, not from this change, out of scope for this repo): hero-agent has
-  // already been migrated to the v2 address independently, so it will fail this specific check until
-  // browser/agent-memory.js, FORMAT.md, and hero-foundry-web are migrated too (migrate-agentmemory-v2.mjs
-  // patches the hero-foundry-web + README refs; browser/agent-memory.js and hero-agent are not in its
-  // REFS list and need a human decision on when/how to roll v2 out there).
-  const staticFiles = files.filter((f) => !f.endsWith("node/onchain.mjs"));
-  for (const f of staticFiles) {
+  // Address-literal check: every surface must agree on the SAME canonical contract address, so the
+  // same wallet derives the same key everywhere (cross-surface interop). All surfaces are on the live
+  // v2 contract, and node/onchain.mjs carries it as its last-resort fallback (it otherwise resolves
+  // MEM_ADDR at runtime: HERO_MEM_ADDR env -> repo-local out/deployment.json -> that same literal).
+  const CANONICAL_ADDR = MEM_ADDR; // live v2 (0xce4dc9...), resolved from out/deployment.json
+  for (const f of files) {
     const src = await readFile(f, "utf8");
-    assert(src.includes(LEGACY_V1_ADDR), `default address (${LEGACY_V1_ADDR}) missing in ${f}`);
+    assert(src.includes(CANONICAL_ADDR), `canonical v2 address (${CANONICAL_ADDR}) missing in ${f}`);
   }
-  const onchainSrc = await readFile(resolve(ROOT, "node/onchain.mjs"), "utf8");
-  assert(onchainSrc.includes(LEGACY_V1_ADDR), "node/onchain.mjs should still carry the legacy address as its last-resort fallback");
   // And the resolved runtime template (fallback address substituted) matches what pre-migration
   // callers derived, so the v1-message-format itself hasn't silently drifted.
   const v1FallbackTemplate = "Hero Run Agent Memory key v2\nOnly sign this on herorunai.com. It derives the private key to your agent memory. Never sign it on any other site.\nContract: " + LEGACY_V1_ADDR + "\nChain: 4663";

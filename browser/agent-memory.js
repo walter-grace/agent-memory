@@ -12,7 +12,7 @@ import { keccak256, encodePacked, bytesToHex, hexToBytes } from "viem";
 import { RH_RPC_URLS, rpcCall } from "./rpc-client";
 import { gzipSync, gunzipSync, strFromU8, strToU8 } from "fflate";
 
-export const MEM_ADDR = "0x881a9f7ed58b7655c3c04bb2f9ef2cffd233a5ef";
+export const MEM_ADDR = "0xce4dc968827a996f7bd5bbdb0fcb72348b18d0dc";
 export const MEM_CHAIN_HEX = "0x1237";
 // Key-derivation message. v2 is domain-separated and self-warning so a single blind phished
 // signature is not silently reusable, and versioned so it can rotate. Writers seal with the v2 key;

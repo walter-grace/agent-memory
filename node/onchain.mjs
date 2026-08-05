@@ -25,7 +25,7 @@ function defaultMemAddr() {
     const dep = JSON.parse(readFileSync(join(HERE, "../out/deployment.json"), "utf8"));
     if (dep?.address) return dep.address;
   } catch { /* no repo-local deployment record — published package or standalone use */ }
-  return "0x881a9f7ed58b7655c3c04bb2f9ef2cffd233a5ef";
+  return "0xce4dc968827a996f7bd5bbdb0fcb72348b18d0dc";
 }
 export const MEM_ADDR = process.env.HERO_MEM_ADDR || defaultMemAddr();
 const RH_RPC = process.env.RH_RPC || "https://rpc.mainnet.chain.robinhood.com";
