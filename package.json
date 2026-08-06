@@ -1,6 +1,9 @@
 {
-  "name": "agent-memory",
+  "name": "@herorun/agent-memory",
   "version": "0.1.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Wallet-owned, compacting memory for AI agents: an agent is an NFT, its memory a hash-linked chain of encrypted checkpoints on Robinhood Chain. Includes the Solidity contracts, deploy/migration tooling, a memory CLI, and a Node/browser client library. Powered by $HERO.",
   "type": "module",
   "license": "MIT",
@@ -33,6 +36,9 @@
     "./node/compaction": {
       "types": "./node/compaction.d.ts",
       "default": "./node/compaction.mjs"
+    },
+    "./node/proxy": {
+      "default": "./node/proxy.mjs"
     },
     "./browser/agent-memory": {
       "types": "./browser/agent-memory.d.ts",

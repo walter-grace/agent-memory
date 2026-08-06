@@ -1,0 +1,35 @@
+{
+  "name": "hero-memory-proxy",
+  "version": "0.1.0",
+  "description": "Give any OpenAI-compatible harness wallet-owned, encrypted, on-chain memory: point OPENAI_BASE_URL at this proxy and every exchange becomes a hash-linked checkpoint your wallet owns. Thin launcher for @herorun/agent-memory.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Hero Run",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/walter-grace/agent-memory"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "hero-memory-proxy": "bin.mjs"
+  },
+  "files": [
+    "bin.mjs"
+  ],
+  "dependencies": {
+    "@herorun/agent-memory": "^0.1.0",
+    "viem": "^2.55.10",
+    "fflate": "^0.8.0"
+  },
+  "keywords": [
+    "agent",
+    "memory",
+    "openai-compatible",
+    "proxy",
+    "onchain",
+    "wallet",
+    "hero-run"
+  ]
+}

@@ -151,8 +151,14 @@ there: it forwards inference upstream unchanged, and on the side it encrypts eve
 checkpoints it to your agent NFT. Any harness that reads `OPENAI_BASE_URL` gets wallet-owned,
 hash-verified, portable memory with no code changes.
 
-Not published to npm yet, so run it from a clone. `npm link` puts the `hero-memory-proxy` command on
-your PATH; without it, `node node/proxy.mjs` does the same thing.
+```bash
+npx hero-memory-proxy
+#   No wallet configured, so one was generated for you:
+#     0xAbC…                saved to ~/.hero/proxy.json (0600, never leaves this machine)
+```
+
+Or from a clone (`npm link` puts the `hero-memory-proxy` command on your PATH; without it,
+`node node/proxy.mjs` does the same thing):
 
 ```bash
 git clone https://github.com/walter-grace/agent-memory && cd agent-memory
