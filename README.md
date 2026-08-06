@@ -151,17 +151,31 @@ there: it forwards inference upstream unchanged, and on the side it encrypts eve
 checkpoints it to your agent NFT. Any harness that reads `OPENAI_BASE_URL` gets wallet-owned,
 hash-verified, portable memory with no code changes.
 
+There is nothing to set up first. Run it, and it creates a wallet for you on the spot:
+
 ```bash
-# 1. a wallet with a little Robinhood Chain gas signs the writes and derives the encryption key
-export AGENT_PRIVATE_KEY=0x...
+npx hero-memory-proxy
+#   No wallet configured, so one was generated for you:
+#     0xAbC…                saved to ~/.hero/proxy.json (0600, never leaves this machine)
+#   Fund it with a small amount of ETH on Robinhood Chain (chain 4663) for gas, then:
+#     hero-memory-proxy --mint "my-agent"
 
-# 2. mint an agent identity once (prints its id)
-npx hero-memory-proxy --mint "my-coding-agent"
-
-# 3. run the proxy, pointed at your agent
-HERO_AGENT_ID=<id> npx hero-memory-proxy
+npx hero-memory-proxy --mint "my-coding-agent"   # remembers the agent id for you
+npx hero-memory-proxy                            # now recording
 #   hero-memory-proxy on http://localhost:8788/v1  ->  https://herorunai.com/v1
 ```
+
+Already have a wallet (your own, or one your wallet factory issued)? Import it:
+
+```bash
+npx hero-memory-proxy --import 0x<private-key>   # stored 0600 in ~/.hero/proxy.json
+npx hero-memory-proxy --whoami                   # wallet, agent, gas balance, config path
+```
+
+`AGENT_PRIVATE_KEY` and `HERO_AGENT_ID` still work and take precedence, so CI and existing setups are
+unaffected. The only thing the managed wallet needs from you is a little Robinhood Chain gas: each
+checkpoint is one transaction (about $0.003), and the proxy warns at startup if the balance is zero
+instead of failing on every write.
 
 Now point any harness at it. No SDK, no rewrite, one variable:
 
@@ -197,10 +211,17 @@ const { entries, verified } = await new OnchainMemory({ agentId: 42, privateKey:
 flushes the buffer on shutdown, so Ctrl-C never drops an in-flight batch. `GET /health` reports the
 agent, wallet, and how many checkpoints it has written.
 
-**Run it locally, or on infra you control, only.** The proxy holds `AGENT_PRIVATE_KEY` and, by
-necessity, sees plaintext before it encrypts. On your machine the key never leaves it. Hosted for other
-people, this process would be the plaintext honeypot the whole design exists to avoid, so there is no
-hosted version and you should not build one.
+**Run it locally, or on infra you control, only.** The proxy holds the wallet key and, by necessity,
+sees plaintext before it encrypts. On your machine the key never leaves it (`~/.hero/proxy.json`, 0600).
+Hosted for other people, this process would be the plaintext honeypot the whole design exists to avoid,
+so there is no hosted version and you should not build one.
+
+**Why a wallet at all, when you already have an API key.** The `hr_live_` key is a billing credential:
+it pays for inference in $HERO, and that is all it can do. Writing a checkpoint needs an ECDSA signature
+from the wallet that owns the agent NFT, and the encryption key is derived from a wallet signature, so
+without a wallet there is no signature, no key, and no private memory. Collapsing the two would mean
+someone else holding the key that decrypts your memory, which is the one thing this project exists to
+avoid. The wallet is generated for you so it costs you a funding step, not an understanding step.
 
 ## Dependencies
 

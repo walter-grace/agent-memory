@@ -25,25 +25,117 @@
 //   HERO_MEMORY_BATCH   exchanges per on-chain checkpoint (default 5). One signature per batch, not per
 //                       call, or gas and confirmations would dominate. Flushed on shutdown regardless.
 import http from "node:http";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync, chmodSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
+import { createPublicClient, http as viemHttp, defineChain, formatEther } from "viem";
 import { OnchainMemory, mintAgent, MEM_ADDR } from "./onchain.mjs";
 
 const UPSTREAM = (process.env.HERO_MEMORY_UPSTREAM || "https://herorunai.com/v1").replace(/\/$/, "");
 const PORT = Number(process.env.PORT || 8788);
 const BATCH = Math.max(1, Number(process.env.HERO_MEMORY_BATCH || 5));
-const AGENT_ID = process.env.HERO_AGENT_ID;
-const PK = process.env.AGENT_PRIVATE_KEY;
 
-// ---- one-shot: mint an agent identity, print its id, exit. `npx hero-memory-proxy --mint`. ----
-if (process.argv.includes("--mint")) {
-  if (!PK) { console.error("Set AGENT_PRIVATE_KEY first (a wallet with a little Robinhood Chain gas)."); process.exit(1); }
-  const label = process.argv[process.argv.indexOf("--mint") + 1] && !process.argv[process.argv.indexOf("--mint") + 1].startsWith("-")
-    ? process.argv[process.argv.indexOf("--mint") + 1] : "openai-proxy-agent";
-  const { agentId, tx } = await mintAgent({ privateKey: PK, label });
-  console.log(`Minted agent #${agentId} (label "${label}") on ${MEM_ADDR}\n  tx: ${tx}\n  Now run the proxy with:  HERO_AGENT_ID=${agentId}`);
+// ---- local identity file -------------------------------------------------------------------------
+// "Bring a funded wallet" is a wall for anyone who just wants to try this, and the wall has nothing to
+// do with the idea. So the proxy manages a wallet for you, on your machine: generated on first run,
+// saved 0600 in ~/.hero, never transmitted. That keeps the property that matters (you hold the key
+// that decrypts your memory, we cannot) while removing the part nobody enjoys. Env vars always win,
+// so CI and existing setups that already export AGENT_PRIVATE_KEY are unaffected.
+const HOME_DIR = process.env.HERO_HOME || join(homedir(), ".hero");
+const CONF_PATH = join(HOME_DIR, "proxy.json");
+
+function readConf() {
+  try {
+    const c = JSON.parse(readFileSync(CONF_PATH, "utf8"));
+    // A key readable by every process on a shared box is not a key. Fix it rather than warn and move on.
+    try { if ((statSync(CONF_PATH).mode & 0o077) !== 0) { chmodSync(CONF_PATH, 0o600); console.warn(`[hero-memory] tightened permissions on ${CONF_PATH} to 0600.`); } } catch {}
+    return c;
+  } catch { return {}; }
+}
+function writeConf(patch) {
+  const next = { ...readConf(), ...patch };
+  mkdirSync(HOME_DIR, { recursive: true, mode: 0o700 });
+  writeFileSync(CONF_PATH, JSON.stringify(next, null, 2), { mode: 0o600 });
+  try { chmodSync(CONF_PATH, 0o600); } catch {}
+  return next;
+}
+const normKey = (k) => {
+  const s = String(k || "").trim().replace(/^0x/i, "");
+  if (!/^[0-9a-fA-F]{64}$/.test(s)) throw new Error("A private key must be 64 hex characters (with or without the 0x prefix).");
+  return "0x" + s.toLowerCase();
+};
+const argAfter = (flag) => { const i = process.argv.indexOf(flag); const v = process.argv[i + 1]; return v && !v.startsWith("-") ? v : null; };
+
+const rh = defineChain({ id: 4663, name: "Robinhood Chain", nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 }, rpcUrls: { default: { http: [process.env.RH_RPC || "https://rpc.mainnet.chain.robinhood.com"] } } });
+const gasOf = async (addr) => {
+  try { return formatEther(await createPublicClient({ chain: rh, transport: viemHttp() }).getBalance({ address: addr })); } catch { return null; }
+};
+
+// ---- resolve the wallet: env first, then the saved file, then generate one ----
+let conf = readConf();
+let PK, generated = false;
+if (process.env.AGENT_PRIVATE_KEY) PK = normKey(process.env.AGENT_PRIVATE_KEY);
+else if (conf.privateKey) PK = normKey(conf.privateKey);
+
+// `--import <key>`: adopt a wallet you already control (one you funded, or one your wallet factory
+// issued). Stored the same way as a generated one, so every later command just works.
+if (process.argv.includes("--import")) {
+  const raw = argAfter("--import");
+  if (!raw) { console.error("Usage: hero-memory-proxy --import <private-key>"); process.exit(1); }
+  let key; try { key = normKey(raw); } catch (e) { console.error(e.message); process.exit(1); }
+  const acct = privateKeyToAccount(key);
+  // A different wallet owns different agents, so a stale agentId would point at one this key cannot write to.
+  const prev = readConf();
+  conf = writeConf({ privateKey: key, agentId: prev.privateKey && normKey(prev.privateKey) !== key ? undefined : prev.agentId });
+  console.log(`Imported wallet ${acct.address}\n  saved to ${CONF_PATH} (0600)`);
+  const bal = await gasOf(acct.address);
+  console.log(bal !== null ? `  Robinhood Chain gas: ${bal} ETH` : "  (could not read balance right now)");
+  console.log(conf.agentId ? `  agent #${conf.agentId} kept` : "  Next:  hero-memory-proxy --mint \"my-agent\"");
   process.exit(0);
 }
 
-if (!PK) { console.error("hero-memory-proxy: AGENT_PRIVATE_KEY is required. See the header of node/proxy.mjs."); process.exit(1); }
+if (!PK) {
+  // First run with nothing configured: make a wallet rather than failing with a setup instruction.
+  PK = generatePrivateKey();
+  conf = writeConf({ privateKey: PK });
+  generated = true;
+}
+const ACCOUNT = privateKeyToAccount(PK);
+let AGENT_ID = process.env.HERO_AGENT_ID ?? conf.agentId ?? null;
+
+// ---- `--whoami`: what wallet am I, what agent, am I funded ----
+if (process.argv.includes("--whoami")) {
+  console.log(`wallet:   ${ACCOUNT.address}`);
+  console.log(`agent:    ${AGENT_ID != null ? "#" + AGENT_ID : "none yet (run --mint)"}`);
+  console.log(`config:   ${CONF_PATH}`);
+  console.log(`contract: ${MEM_ADDR}`);
+  const bal = await gasOf(ACCOUNT.address);
+  console.log(`gas:      ${bal !== null ? bal + " ETH on Robinhood Chain" : "unavailable"}`);
+  process.exit(0);
+}
+
+if (generated) {
+  console.log(`No wallet configured, so one was generated for you:\n  ${ACCOUNT.address}\n  saved to ${CONF_PATH} (0600, never leaves this machine)\n`);
+  console.log(`Fund it with a small amount of ETH on Robinhood Chain (chain 4663) for gas, then:\n  hero-memory-proxy --mint "my-agent"\n`);
+  console.log(`Already have a wallet? Import it instead:  hero-memory-proxy --import 0x...\n`);
+}
+
+// ---- one-shot: mint an agent identity, remember it, exit. ----
+if (process.argv.includes("--mint")) {
+  const label = argAfter("--mint") || "openai-proxy-agent";
+  const bal = await gasOf(ACCOUNT.address);
+  if (bal !== null && Number(bal) === 0) {
+    console.error(`Wallet ${ACCOUNT.address} has no Robinhood Chain gas, so the mint would fail.\nSend it a small amount of ETH on chain 4663 and try again.`);
+    process.exit(1);
+  }
+  try {
+    const { agentId, tx } = await mintAgent({ privateKey: PK, label });
+    writeConf({ agentId });
+    console.log(`Minted agent #${agentId} (label "${label}") on ${MEM_ADDR}\n  tx: ${tx}\n  saved to ${CONF_PATH}, so just run:  hero-memory-proxy`);
+  } catch (e) { console.error(`Mint failed: ${e.shortMessage || e.message}`); process.exit(1); }
+  process.exit(0);
+}
 
 // ---- memory sink: buffer exchanges, checkpoint one batch at a time, serialized so writes can't race
 //      each other's nonces. Records only AFTER a successful upstream response, never on an error. ----
@@ -104,7 +196,7 @@ function makeStreamCapture() {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   if (url.pathname === "/health" || url.pathname === "/") {
-    return json(res, 200, { ok: true, upstream: UPSTREAM, agentId: AGENT_ID ?? null, wallet: mem?.account?.address ?? null, contract: MEM_ADDR, batch: BATCH, buffered: buffer.length, checkpoints_written: written, note: mem ? "recording" : "no HERO_AGENT_ID: proxying inference only, storing nothing" });
+    return json(res, 200, { ok: true, upstream: UPSTREAM, agentId: AGENT_ID ?? null, wallet: ACCOUNT.address, contract: MEM_ADDR, batch: BATCH, buffered: buffer.length, checkpoints_written: written, note: mem ? "recording" : "no agent yet: proxying inference only, storing nothing" });
   }
   if (!url.pathname.startsWith("/v1/")) return json(res, 404, { error: "not found" });
 
@@ -156,10 +248,15 @@ async function shutdown() { if (closing) return; closing = true; console.log("\n
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   console.log(`hero-memory-proxy on http://localhost:${PORT}/v1  ->  ${UPSTREAM}`);
   console.log(mem
-    ? `Recording to agent #${AGENT_ID} (wallet ${mem.account.address}), one checkpoint per ${BATCH} exchange(s).`
-    : "No HERO_AGENT_ID set: proxying inference only, storing nothing. Run with --mint to create an agent.");
+    ? `Recording to agent #${AGENT_ID} (wallet ${ACCOUNT.address}), one checkpoint per ${BATCH} exchange(s).`
+    : `No agent yet (wallet ${ACCOUNT.address}). Proxying inference only, storing nothing. Run:  hero-memory-proxy --mint "my-agent"`);
   console.log(`Point your harness at it:  export OPENAI_BASE_URL=http://localhost:${PORT}/v1`);
+  // Checkpoints cost gas. Say so once at startup rather than letting every flush fail later.
+  if (mem) {
+    const bal = await gasOf(ACCOUNT.address);
+    if (bal !== null && Number(bal) === 0) console.warn(`[hero-memory] WARNING: ${ACCOUNT.address} has no Robinhood Chain gas, so checkpoints will fail. Send it a little ETH on chain 4663.`);
+  }
 });
