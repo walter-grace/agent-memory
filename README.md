@@ -54,7 +54,7 @@ Gas is the chain's native ETH; $HERO is the stake and the currency, never the ga
 | Contract | What it does |
 | --- | --- |
 | [`contracts/AgentMemory.sol`](contracts/AgentMemory.sol) | ERC-721 agents + `checkpoint(agentId, bytes)` hash-linked history + compaction. `rebase()` is owner-only (an approved operator can `checkpoint` but never erase-by-omission the chain head) and every `checkpoint` is gated by `MAX_CHECKPOINT_BYTES` so one write can't grief indexers with an unbounded blob. Live on Robinhood Chain at `0xce4dc968…` (v2). |
-| [`contracts/HeroMemoryCard.sol`](contracts/HeroMemoryCard.sol) | Fully on-chain cover NFTs. `mint(to, uri)` stores a complete `data:` token URI on-chain and pulls a $HERO fee to the treasury via `SafeERC20`. |
+| [`contracts/HeroMemoryCard.sol`](contracts/HeroMemoryCard.sol) | Fully on-chain cover NFTs. `mint(to, uri, maxFee)` stores a complete `data:` token URI on-chain and pulls `mintFee` in $HERO to the treasury via `SafeERC20` (approve first). `maxFee` is the caller's slippage guard: the mint reverts with `FeeTooHigh` rather than charging more than quoted if the owner raises the fee in between. `maxUriBytes` bounds the stored URI, and `rescue` recovers tokens sent to the contract by mistake. Live on Robinhood Chain at `0x35777ae6…` (v2). |
 
 ## What is in the box
 
