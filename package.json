@@ -73,5 +73,8 @@
     "hero-run",
     "web3",
     "typescript"
-  ]
+  ],
+  "bin": {
+    "hero-memory-proxy": "node/proxy.mjs"
+  }
 }

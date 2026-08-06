@@ -144,6 +144,64 @@ await mem.append([{ role: "user", text: "launch is next Tuesday" }]); // one tx,
 const { entries, verified } = await mem.recall();
 ```
 
+## Any OpenAI harness, minting to the chain (the memory proxy)
+
+Your agent framework already knows how to talk to an OpenAI-compatible `/v1`. The proxy inserts itself
+there: it forwards inference upstream unchanged, and on the side it encrypts every exchange and
+checkpoints it to your agent NFT. Any harness that reads `OPENAI_BASE_URL` gets wallet-owned,
+hash-verified, portable memory with no code changes.
+
+```bash
+# 1. a wallet with a little Robinhood Chain gas signs the writes and derives the encryption key
+export AGENT_PRIVATE_KEY=0x...
+
+# 2. mint an agent identity once (prints its id)
+npx hero-memory-proxy --mint "my-coding-agent"
+
+# 3. run the proxy, pointed at your agent
+HERO_AGENT_ID=<id> npx hero-memory-proxy
+#   hero-memory-proxy on http://localhost:8788/v1  ->  https://herorunai.com/v1
+```
+
+Now point any harness at it. No SDK, no rewrite, one variable:
+
+```bash
+# LangChain, CrewAI, AutoGPT, LlamaIndex, the OpenAI SDK, a curl script...
+export OPENAI_BASE_URL=http://localhost:8788/v1
+export OPENAI_API_KEY=hr_live_...        # your Hero Run key: bills inference in $HERO
+```
+
+```python
+# LangChain, unchanged. Every call is now minted to your agent's chain.
+from langchain_openai import ChatOpenAI
+llm = ChatOpenAI(model="auto", base_url="http://localhost:8788/v1")
+llm.invoke("Design a caching layer for the payments service.")
+```
+
+```bash
+# prime-agent (or anything that honors the env var), unchanged
+OPENAI_BASE_URL=http://localhost:8788/v1 prime-agent run "refactor the auth module"
+```
+
+Read it back anywhere the format is spoken, the same wallet decrypts it in the memory graph on
+herorunai.com, in Claude Code via the MCP server, or here:
+
+```js
+import { OnchainMemory } from "agent-memory/node/onchain";
+const { entries, verified } = await new OnchainMemory({ agentId: 42, privateKey: "0x..." }).recall();
+```
+
+**Config:** `HERO_MEMORY_UPSTREAM` (default `https://herorunai.com/v1`, point it at any OpenAI provider),
+`HERO_RUN_KEY` (fallback inference key when the client sends none), `PORT` (default 8788),
+`HERO_MEMORY_BATCH` (exchanges per checkpoint, default 5: one signature per batch, not per call). It
+flushes the buffer on shutdown, so Ctrl-C never drops an in-flight batch. `GET /health` reports the
+agent, wallet, and how many checkpoints it has written.
+
+**Run it locally, or on infra you control, only.** The proxy holds `AGENT_PRIVATE_KEY` and, by
+necessity, sees plaintext before it encrypts. On your machine the key never leaves it. Hosted for other
+people, this process would be the plaintext honeypot the whole design exists to avoid, so there is no
+hosted version and you should not build one.
+
 ## Dependencies
 
 `node/local.mjs` and `node/compaction.mjs` have zero runtime dependencies. `viem` and `fflate` are optional at the library level: `viem` is needed only for the on-chain path, `fflate` and `viem` for the browser SDK. This repo's own tooling (`compile.mjs`) additionally uses `solc` as a dev dependency to build `out/AgentMemory.json` from `contracts/AgentMemory.sol`.
