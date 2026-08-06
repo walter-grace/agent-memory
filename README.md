@@ -151,25 +151,30 @@ there: it forwards inference upstream unchanged, and on the side it encrypts eve
 checkpoints it to your agent NFT. Any harness that reads `OPENAI_BASE_URL` gets wallet-owned,
 hash-verified, portable memory with no code changes.
 
-There is nothing to set up first. Run it, and it creates a wallet for you on the spot:
+Not published to npm yet, so run it from a clone. `npm link` puts the `hero-memory-proxy` command on
+your PATH; without it, `node node/proxy.mjs` does the same thing.
 
 ```bash
-npx hero-memory-proxy
+git clone https://github.com/walter-grace/agent-memory && cd agent-memory
+npm install          # viem is the only runtime dependency
+npm link             # optional: gives you the `hero-memory-proxy` command
+
+hero-memory-proxy    # or: node node/proxy.mjs
 #   No wallet configured, so one was generated for you:
 #     0xAbC…                saved to ~/.hero/proxy.json (0600, never leaves this machine)
 #   Fund it with a small amount of ETH on Robinhood Chain (chain 4663) for gas, then:
 #     hero-memory-proxy --mint "my-agent"
 
-npx hero-memory-proxy --mint "my-coding-agent"   # remembers the agent id for you
-npx hero-memory-proxy                            # now recording
+hero-memory-proxy --mint "my-coding-agent"   # remembers the agent id for you
+hero-memory-proxy                            # now recording
 #   hero-memory-proxy on http://localhost:8788/v1  ->  https://herorunai.com/v1
 ```
 
 Already have a wallet (your own, or one your wallet factory issued)? Import it:
 
 ```bash
-npx hero-memory-proxy --import 0x<private-key>   # stored 0600 in ~/.hero/proxy.json
-npx hero-memory-proxy --whoami                   # wallet, agent, gas balance, config path
+hero-memory-proxy --import 0x<private-key>   # stored 0600 in ~/.hero/proxy.json
+hero-memory-proxy --whoami                   # wallet, agent, gas balance, config path
 ```
 
 `AGENT_PRIVATE_KEY` and `HERO_AGENT_ID` still work and take precedence, so CI and existing setups are
