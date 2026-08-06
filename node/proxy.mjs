@@ -145,11 +145,27 @@ let pendingExchanges = 0;     // exchanges counted toward the next batch
 let written = 0;              // checkpoints written this session
 let chain = Promise.resolve();// append serializer
 
-function record(userText, assistantText, model) {
+// Which harness produced this exchange. Worth recording: once several agents write to one wallet,
+// "who wrote this" is the difference between a readable history and an undifferentiated pile. The
+// client's own User-Agent is the honest signal (a harness identifies itself there without being asked)
+// and HERO_MEMORY_SOURCE overrides it when someone wants a specific label.
+const SOURCE_OVERRIDE = (process.env.HERO_MEMORY_SOURCE || "").trim();
+function sourceOf(req) {
+  if (SOURCE_OVERRIDE) return SOURCE_OVERRIDE.slice(0, 40);
+  const ua = String(req?.headers?.["user-agent"] || "").trim();
+  if (!ua) return "openai-proxy";
+  // Take the leading product token ("prime-agent/0.4.1 node/22" -> "prime-agent"), which is the part
+  // that names the tool; the version and platform noise after it helps nobody reading a graph.
+  const name = ua.split(/[\s/]/)[0].replace(/[^\w.@-]/g, "");
+  return (name || "openai-proxy").slice(0, 40);
+}
+
+function record(userText, assistantText, model, req) {
   if (!mem) return; // no agent id: proxy inference only, store nothing
   const at = new Date().toISOString();
-  if (userText) buffer.push({ role: "user", text: userText, at, source: "openai-proxy" });
-  if (assistantText) buffer.push({ role: "assistant", text: assistantText, at, model, source: "openai-proxy" });
+  const source = sourceOf(req);
+  if (userText) buffer.push({ role: "user", text: userText, at, source });
+  if (assistantText) buffer.push({ role: "assistant", text: assistantText, at, model, source });
   pendingExchanges++;
   if (pendingExchanges >= BATCH) flush();
 }
@@ -228,7 +244,7 @@ const server = http.createServer(async (req, res) => {
       for (;;) { const { done, value } = await reader.read(); if (done) break; cap.feed(value); res.write(Buffer.from(value)); }
     } catch { /* client hung up */ }
     res.end();
-    if (reqJson) record(lastUser(reqJson.messages), cap.text, reqJson.model);
+    if (reqJson) record(lastUser(reqJson.messages), cap.text, reqJson.model, req);
     return;
   }
 
@@ -236,7 +252,7 @@ const server = http.createServer(async (req, res) => {
   res.writeHead(up.status, { "content-type": up.headers.get("content-type") || "application/json" });
   res.end(buf);
   if (isChat && reqJson) {
-    try { record(lastUser(reqJson.messages), JSON.parse(buf.toString()).choices?.[0]?.message?.content || "", reqJson.model); } catch { /* non-json response */ }
+    try { record(lastUser(reqJson.messages), JSON.parse(buf.toString()).choices?.[0]?.message?.content || "", reqJson.model, req); } catch { /* non-json response */ }
   }
 });
 
