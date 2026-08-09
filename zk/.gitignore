@@ -1,0 +1,9 @@
+node_modules/
+*.ptau
+*.zkey
+*.wtns
+*.r1cs
+*.sym
+proof_of_contents_js/
+circom
+bad_input.json
