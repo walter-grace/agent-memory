@@ -1,0 +1,10 @@
+# Foundry config for the HeroMemoryMarket test suite (run: forge test).
+# HeroMemoryCard.sol needs OpenZeppelin (not vendored here) and is unrelated to the market, so skip it.
+[profile.default]
+src = "contracts"
+test = "test/foundry"
+libs = ["lib"]
+solc = "0.8.24"
+optimizer = true
+optimizer_runs = 200
+skip = ["*HeroMemoryCard.sol"]
