@@ -248,10 +248,6 @@ avoid. The wallet is generated for you so it costs you a funding step, not an un
 - **Cover images are public.** For a wallet to render a Memory Card, its image cannot be encrypted. Keep private memory in encrypted checkpoints; make only the cover public.
 - **Known gap.** The v1 → v2 migration is still rolling out across surfaces: `node/onchain.mjs` in this repo now resolves its contract address dynamically (`out/deployment.json`, currently v2), but `browser/agent-memory.js` and `FORMAT.md` still hardcode the v1 address as a literal, and a sibling deployment (`hero-agent`) has already moved to v2 independently. `migrate-agentmemory-v2.mjs`'s `REFS` list does not currently include `browser/agent-memory.js`. Reconciling all surfaces onto v2 together is a deliberate follow-up, not something this merge silently changed.
 
-## Status
-
-Alpha. `redteam.mjs` exercises the auth and forgery paths against the live contract, `test/security.mjs` covers the crypto/verification fixes above without touching the network, but treat anything holding value as pre-audit until a professional review lands. Issues and PRs welcome.
-
 ## License
 
 MIT. See [LICENSE](LICENSE).
